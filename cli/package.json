@@ -1,0 +1,10 @@
+{
+  "name": "solana-escrow-cli",
+  "version": "0.1.0",
+  "description": "CLI for interacting with the Solana escrow program",
+  "main": "index.js",
+  "dependencies": {
+    "@solana/web3.js": "^1.98.0",
+    "borsh": "^2.0.0"
+  }
+}
