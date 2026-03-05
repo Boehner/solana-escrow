@@ -23,16 +23,16 @@ pub enum EscrowInstruction {
     /// Accounts: [depositor (signer), escrow_pda, vault_pda, system_program]
     Fund,
 
-    /// Release funds to recipient. Depositor authorizes.
-    /// Accounts: [depositor (signer), recipient, escrow_pda, vault_pda]
+    /// Release funds to recipient. Depositor authorizes. 2% fee deducted.
+    /// Accounts: [depositor (signer), recipient, escrow_pda, vault_pda, fee_wallet, system_program]
     Release,
 
     /// Raise a dispute. Either party can call this.
     /// Accounts: [disputer (signer), escrow_pda]
     Dispute,
 
-    /// Resolve a dispute. Currently depositor acts as arbiter.
-    /// Accounts: [arbiter (signer), depositor, recipient, escrow_pda, vault_pda]
+    /// Resolve a dispute. Currently depositor acts as arbiter. 2% fee deducted.
+    /// Accounts: [arbiter (signer), depositor, recipient, escrow_pda, vault_pda, fee_wallet, system_program]
     Resolve {
         release_to_recipient: bool,
     },

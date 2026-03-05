@@ -94,15 +94,17 @@ A typical Web2 escrow service consists of:
 
 4. **Separate vault PDA**: Funds are held in a dedicated vault account rather than the escrow state account. This separates data from value — a pattern that maps to Web2's separation of the `escrows` table from the actual payment processor balance.
 
+5. **Protocol fee (2%)**: On every release or dispute resolution, a 2% fee (200 basis points) is deducted from the vault and sent to a hardcoded fee wallet. This mirrors how Web2 escrow services charge processing fees — except here the fee logic is transparent and enforced on-chain. The fee wallet address is baked into the program as a constant.
+
 ## Program Instructions
 
 | Instruction | Web2 Equivalent | Description |
 |---|---|---|
 | `Initialize` | `POST /escrow` | Create escrow agreement between depositor and recipient |
 | `Fund` | `POST /escrow/:id/fund` | Depositor sends agreed SOL amount to vault |
-| `Release` | `POST /escrow/:id/release` | Depositor authorizes release to recipient |
+| `Release` | `POST /escrow/:id/release` | Depositor authorizes release to recipient (2% fee deducted) |
 | `Dispute` | `POST /escrow/:id/dispute` | Either party raises a dispute |
-| `Resolve` | `POST /escrow/:id/resolve` | Arbiter resolves dispute (release or refund) |
+| `Resolve` | `POST /escrow/:id/resolve` | Arbiter resolves dispute (release or refund, 2% fee deducted) |
 | `Cancel` | `DELETE /escrow/:id` | Cancel unfunded escrow, reclaim rent |
 
 ## State Machine

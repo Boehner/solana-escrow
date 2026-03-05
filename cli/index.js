@@ -25,6 +25,8 @@ const path = require("path");
 const RPC_URL = process.env.RPC_URL || "https://api.devnet.solana.com";
 const PROGRAM_ID_FILE = path.join(__dirname, "..", "program-id.json");
 const KEYPAIR_FILE = process.env.KEYPAIR || "C:\\openclaw\\solana\\id.json";
+const FEE_WALLET = new PublicKey("FPRmCVAhz9eeLLAfKaangWaCuBgVmGAyYv99Yc616XdX");
+const FEE_BPS = 200; // 2%
 
 function loadProgramId() {
   if (!fs.existsSync(PROGRAM_ID_FILE)) {
@@ -189,6 +191,9 @@ async function cmdRelease(escrowStr) {
   const state = decodeEscrowState(acct.data);
   const recipient = new PublicKey(state.recipient);
 
+  const fee = Math.floor(state.amount * FEE_BPS / 10000);
+  const payout = state.amount - fee;
+
   const ix = new TransactionInstruction({
     programId,
     keys: [
@@ -196,6 +201,7 @@ async function cmdRelease(escrowStr) {
       { pubkey: recipient, isSigner: false, isWritable: true },
       { pubkey: escrowPda, isSigner: false, isWritable: true },
       { pubkey: vaultPda, isSigner: false, isWritable: true },
+      { pubkey: FEE_WALLET, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
     data: encodeRelease(),
@@ -204,6 +210,7 @@ async function cmdRelease(escrowStr) {
   const tx = new Transaction().add(ix);
   const sig = await sendAndConfirmTransaction(conn, tx, [payer]);
   console.log(`Escrow released to ${state.recipient}!`);
+  console.log(`  Payout: ${payout / LAMPORTS_PER_SOL} SOL | Fee: ${fee / LAMPORTS_PER_SOL} SOL (2%)`);
   console.log(`  TX: https://explorer.solana.com/tx/${sig}?cluster=devnet`);
 }
 
@@ -240,6 +247,9 @@ async function cmdResolve(escrowStr, target) {
   if (!acct) { console.error("Escrow not found"); return; }
   const state = decodeEscrowState(acct.data);
 
+  const fee = Math.floor(state.amount * FEE_BPS / 10000);
+  const payout = state.amount - fee;
+
   const ix = new TransactionInstruction({
     programId,
     keys: [
@@ -248,6 +258,7 @@ async function cmdResolve(escrowStr, target) {
       { pubkey: new PublicKey(state.recipient), isSigner: false, isWritable: true },
       { pubkey: escrowPda, isSigner: false, isWritable: true },
       { pubkey: vaultPda, isSigner: false, isWritable: true },
+      { pubkey: FEE_WALLET, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
     data: encodeResolve(releaseToRecipient),
@@ -256,6 +267,7 @@ async function cmdResolve(escrowStr, target) {
   const tx = new Transaction().add(ix);
   const sig = await sendAndConfirmTransaction(conn, tx, [payer]);
   console.log(`Dispute resolved! Funds sent to ${target}.`);
+  console.log(`  Payout: ${payout / LAMPORTS_PER_SOL} SOL | Fee: ${fee / LAMPORTS_PER_SOL} SOL (2%)`);
   console.log(`  TX: https://explorer.solana.com/tx/${sig}?cluster=devnet`);
 }
 

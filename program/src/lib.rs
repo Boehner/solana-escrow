@@ -28,6 +28,11 @@ mod state;
 use instruction::EscrowInstruction;
 use state::{Escrow, EscrowStatus};
 
+/// Fee wallet — receives 2% of every escrow payout.
+const FEE_WALLET: Pubkey = solana_program::pubkey!("FPRmCVAhz9eeLLAfKaangWaCuBgVmGAyYv99Yc616XdX");
+/// Fee in basis points (200 = 2%).
+const FEE_BPS: u64 = 200;
+
 entrypoint!(process_instruction);
 
 pub fn process_instruction(
@@ -193,6 +198,7 @@ fn process_fund(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult 
 }
 
 /// Release funds to the recipient. Only the depositor can authorize release.
+/// A 2% fee is deducted and sent to the fee wallet.
 fn process_release(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
 
@@ -200,10 +206,16 @@ fn process_release(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
     let recipient = next_account_info(accounts_iter)?;
     let escrow_account = next_account_info(accounts_iter)?;
     let vault = next_account_info(accounts_iter)?;
+    let fee_wallet = next_account_info(accounts_iter)?;
     let system_program = next_account_info(accounts_iter)?;
 
     if !depositor.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    if *fee_wallet.key != FEE_WALLET {
+        msg!("Error: invalid fee wallet");
+        return Err(ProgramError::InvalidArgument);
     }
 
     let mut escrow = Escrow::try_from_slice(&escrow_account.data.borrow())
@@ -220,18 +232,32 @@ fn process_release(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
         return Err(ProgramError::InvalidAccountData);
     }
 
-    // Transfer from vault to recipient using PDA-signed system transfer
     let vault_lamports = escrow.amount;
+    let fee = vault_lamports.checked_mul(FEE_BPS).unwrap() / 10_000;
+    let payout = vault_lamports.checked_sub(fee).unwrap();
+
+    let vault_seeds = &[b"vault" as &[u8], escrow_account.key.as_ref(), &[escrow.vault_bump]];
+
+    // Transfer fee to fee wallet
+    if fee > 0 {
+        invoke_signed(
+            &system_instruction::transfer(vault.key, fee_wallet.key, fee),
+            &[vault.clone(), fee_wallet.clone(), system_program.clone()],
+            &[vault_seeds],
+        )?;
+    }
+
+    // Transfer remainder to recipient
     invoke_signed(
-        &system_instruction::transfer(vault.key, recipient.key, vault_lamports),
+        &system_instruction::transfer(vault.key, recipient.key, payout),
         &[vault.clone(), recipient.clone(), system_program.clone()],
-        &[&[b"vault", escrow_account.key.as_ref(), &[escrow.vault_bump]]],
+        &[vault_seeds],
     )?;
 
     escrow.status = EscrowStatus::Released;
     escrow.serialize(&mut &mut escrow_account.data.borrow_mut()[..])?;
 
-    msg!("Escrow released: {} lamports to {}", vault_lamports, recipient.key);
+    msg!("Escrow released: {} lamports to {} (fee: {} lamports)", payout, recipient.key, fee);
     Ok(())
 }
 
@@ -268,6 +294,7 @@ fn process_dispute(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
 
 /// Resolve a dispute. In this simplified model, the depositor acts as arbiter
 /// (in production, this would be a separate arbiter keypair).
+/// A 2% fee is deducted and sent to the fee wallet.
 fn process_resolve(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -280,10 +307,16 @@ fn process_resolve(
     let recipient = next_account_info(accounts_iter)?;
     let escrow_account = next_account_info(accounts_iter)?;
     let vault = next_account_info(accounts_iter)?;
+    let fee_wallet = next_account_info(accounts_iter)?;
     let system_program = next_account_info(accounts_iter)?;
 
     if !arbiter.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    if *fee_wallet.key != FEE_WALLET {
+        msg!("Error: invalid fee wallet");
+        return Err(ProgramError::InvalidArgument);
     }
 
     let mut escrow = Escrow::try_from_slice(&escrow_account.data.borrow())
@@ -301,12 +334,26 @@ fn process_resolve(
     }
 
     let vault_lamports = escrow.amount;
+    let fee = vault_lamports.checked_mul(FEE_BPS).unwrap() / 10_000;
+    let payout = vault_lamports.checked_sub(fee).unwrap();
     let target = if release_to_recipient { recipient } else { depositor };
 
+    let vault_seeds = &[b"vault" as &[u8], escrow_account.key.as_ref(), &[escrow.vault_bump]];
+
+    // Transfer fee to fee wallet
+    if fee > 0 {
+        invoke_signed(
+            &system_instruction::transfer(vault.key, fee_wallet.key, fee),
+            &[vault.clone(), fee_wallet.clone(), system_program.clone()],
+            &[vault_seeds],
+        )?;
+    }
+
+    // Transfer remainder to target
     invoke_signed(
-        &system_instruction::transfer(vault.key, target.key, vault_lamports),
+        &system_instruction::transfer(vault.key, target.key, payout),
         &[vault.clone(), target.clone(), system_program.clone()],
-        &[&[b"vault", escrow_account.key.as_ref(), &[escrow.vault_bump]]],
+        &[vault_seeds],
     )?;
 
     escrow.status = if release_to_recipient {
@@ -316,7 +363,7 @@ fn process_resolve(
     };
     escrow.serialize(&mut &mut escrow_account.data.borrow_mut()[..])?;
 
-    msg!("Dispute resolved: {} lamports to {}", vault_lamports, target.key);
+    msg!("Dispute resolved: {} lamports to {} (fee: {} lamports)", payout, target.key, fee);
     Ok(())
 }
 
